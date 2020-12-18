@@ -47,7 +47,7 @@ cur.execute(sql)
 result = cur.fetchone()
 
 # トークン取得
-TOKEN = result[ "Nzg5NTMzNjYwMzE4NTMxNjI0.X9zchQ.FrX1kpp9tcwEW10LlrYCgZnpmXo"]
+TOKEN = result[ "bbc4a08598f0f9f2b625d11c16e2f2d0039507c9c0f895d6cb9590da3ea5ccd3"]
 # チャンネルID取得
 CHANNEL_ID = result[1]
 
