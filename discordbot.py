@@ -26,41 +26,37 @@ import os.path
 import re
 import discord
 import asyncio
+import os, psycopg2
+import json
 from bs4 import BeautifulSoup
 
-# 通知管理用ファイルパス指定
-listFilePath = 'list.txt'
+path = "PATH"
+port = "5432"
+dbname = "DB_NAME"
+user = "USER"
+password = "PASSWORD"
+conText = "host={} port={} dbname={} user={} password={}"
+conText = conText.format(path,port,dbname,user,password)
+connection = psycopg2.connect(conText)
 
-# 自分のBotのアクセストークンに置き換えてください
-TOKEN = 'Nzg5NTMzNjYwMzE4NTMxNjI0.X9zchQ.OYpcg99QCXrxlOEqRPvkEC6wNtk'
+cur = connection.cursor()
+sql = "select token,channel_id from settings"
+cur.execute(sql)
+result = cur.fetchone()
 
-# 任意のチャンネルID(int)
-CHANNEL_ID = 0000000000000000
+# トークン取得
+TOKEN = result[0]
+# チャンネルID取得
+CHANNEL_ID = result[1]
 
-# 確認したいコミュニティを設定
-targetCommunitys = ['co5061903']
-
-# リスト内検索 あればTrue 無ければFalseを返す
-def searchList(liveURL):
-    # ファイル存在チェック
-    if not os.path.exists(listFilePath):
-        return False
-
-    liveLV = liveIdExtraction(liveURL)
-
-    #ファイル内チェック
-    with open(listFilePath) as f:
-        for i, line in enumerate(f):
-            if line == liveLV + '\n':
-                return True
-    print(line)
-    return False
-
-# リストに放送ID追記
-def addList(liveURL):
-    liveLV = liveIdExtraction(liveURL)
-    with open(listFilePath, 'a') as f:
-        print(liveLV, file=f)
+# targetテーブルから確認したいコミュニティを取得
+def getTarget():
+    targetCommunitys = [co5061903]
+    sql = "select community from target"
+    cur.execute(sql)
+    for row in cur:
+        targetCommunitys.append(row[0])
+    return targetCommunitys
 
 # 放送URLから放送ID(lvXXXXXXX)抽出
 def liveIdExtraction(liveURL):
@@ -80,7 +76,25 @@ def getLiveName(liveURL):
     soup = BeautifulSoup(r.content, "html.parser")
     return soup.find("span",{"class":"name"}).text
 
+# logsテーブル内検索 あればTrue 無ければFalseを返す
+def searchList(liveURL):
+    liveLV = liveIdExtraction(liveURL)
+    cur = connection.cursor()
+    sql = "SELECT count(*)  FROM logs WHERE live = '" + liveLV + "'"
+    cur.execute(sql)
+    result = cur.fetchone()
+    if int(result[0]) > 0:
+        return True
+    else:
+        return False
 
+# logsテーブルに放送ID追記
+def addList(liveURL):
+    liveLV = liveIdExtraction(liveURL)
+    cur = connection.cursor()
+    sql = "insert into logs(live) values('"+ liveLV + "');"
+    cur.execute(sql)
+    connection.commit()
 
 # 接続に必要なオブジェクトを生成
 client = discord.Client()
@@ -88,34 +102,61 @@ client = discord.Client()
 # 起動時に動作する処理
 @client.event
 async def on_ready():
+
     while(True):
         # ターゲットコミュニティの数だけ繰り返す
+        targetCommunitys = getTarget()
         for targetCommunity in targetCommunitys:
             # URLを設定
-            r = requests.get("https://com.nicovideo.jp/community/" + targetCommunity)
+            r = requests.get("https://live.nicovideo.jp/watch/" + targetCommunity)
 
             # コミュニティTOPページを確認
             soup = BeautifulSoup(r.content, "html.parser")
-            result = soup.find("section", "now_live")
+            result = soup.find('meta', attrs={'property': 'og:url', 'content': True})
+            # 放送URL取得
+            liveURL = result['content']
 
-            # もし放送が始まっていれば
-            if result is not None:
-                # 放送URL取得
-                liveURL = result.find("a", "now_live_inner").get("href")
+            # リスト内を検索してすでに処理済みの放送IDであれば処理しない
+            if searchList(liveURL) is False:
+                # 放送タイトル取得
+                liveTitle = getLiveTitle(liveURL)
+                # 放送者名取得
+                liveName = getLiveName(liveURL)
 
-                # リスト内を検索してすでに処理済みの放送IDであれば処理しない
-                if searchList(liveURL) is False:
-                    # 放送タイトル取得
-                    liveTitle = getLiveTitle(liveURL)
-                    # 放送者名取得
-                    liveName = getLiveName(liveURL)
+                # Discordへ送信
+                channel = client.get_channel(int(CHANNEL_ID))
+                await channel.send(liveName + 'さんが配信を開始しました\n\n' + liveTitle + '\n' + liveURL)
 
+                # 放送ID追記
+                addList(liveURL)
+
+        # チャンネル検索
+        url = 'https://api.search.nicovideo.jp/api/v2/live/contents/search'
+        ua = 'Twitter rasirasirasi34'
+        headers = {'User-Agent': ua}
+        params = {
+            'q': 'BoxTV',
+            'targets': 'title,description,tags',
+            '_sort': '-openTime',
+            '_context': ua,
+            'fields': 'contentId,channelId,liveStatus,title',
+            'filters[channelId][0]': '2640777',
+            'filters[liveStatus][0]': 'onair'
+        }
+        # リクエスト
+        res = requests.get(url, headers=headers, params=params)
+        # 取得したjsonをlists変数に格納
+        lists = json.loads(res.text)
+
+        if lists['meta']['totalCount'] > 0:
+            for data in lists['data']:
+                if searchList(data['contentId']) is False:
                     # Discordへ送信
-                    channel = client.get_channel(CHANNEL_ID)
-                    await channel.send('@everyone ' + liveName + 'さんが配信を開始しました\n\n' + liveTitle + '\n' + liveURL)
+                    channel = client.get_channel(int(CHANNEL_ID))
+                    await channel.send('チャンネルで配信を開始しました\n\n' + data['title'] + '\nhttps://nico.ms/' + data['contentId'])
 
                     # 放送ID追記
-                    addList(liveURL)
+                    addList(data['contentId'])
 
         # 1分待つ
         await asyncio.sleep(60)
