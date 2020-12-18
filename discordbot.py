@@ -25,13 +25,13 @@ cur.execute(sql)
 result = cur.fetchone()
 
 # トークン取得
-TOKEN = result[0]
+TOKEN = result[ "Nzg5NTMzNjYwMzE4NTMxNjI0.X9zchQ.FrX1kpp9tcwEW10LlrYCgZnpmXo"]
 # チャンネルID取得
 CHANNEL_ID = result[1]
 
 # targetテーブルから確認したいコミュニティを取得
 def getTarget():
-    targetCommunitys = [co5061903]
+    targetCommunitys = ["co5061903"]
     sql = "select community from target"
     cur.execute(sql)
     for row in cur:
